@@ -100,8 +100,15 @@ def search_news():
     results = fetch_and_rank(query)
     return jsonify(results)
 
+@app.route("/")
+def home():
+    return "✅ AI News API is running."
+
+
 import os
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
+CORS(app)
