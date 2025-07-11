@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import time, json, feedparser, urllib.parse, re
+import time, json, feedparser, urllib.parse, re, os
 from urllib.parse import urlparse
 from pathlib import Path
 import urllib.request
@@ -23,7 +22,8 @@ def load_archive():
 def save_archive(data):
     Path(STORAGE_PATH).write_text(json.dumps(data, indent=2))
 
-def domain_of(url): return urlparse(url).netloc.lower()
+def domain_of(url): 
+    return urlparse(url).netloc.lower()
 
 def sentence_split(text):
     parts = re.split(r'(?<=[.!?]) +', text.strip())
@@ -39,8 +39,10 @@ def fetch_page_pubtime_head(url):
         with urllib.request.urlopen(req, timeout=4) as r:
             head_html = r.read(4096).decode(errors="ignore")
         match = re.search(r'property="article:published_time" content="([^"]+)"', head_html)
-        if match: return match.group(1)
-    except: pass
+        if match:
+            return match.group(1)
+    except:
+        pass
     return None
 
 def score_item(title, summary, query, domain, pub_rss, pub_page):
@@ -52,13 +54,16 @@ def score_item(title, summary, query, domain, pub_rss, pub_page):
         pub_time = time.mktime(time.strptime(pub_page or pub_rss, "%Y-%m-%dT%H:%M:%SZ"))
         hours_ago = (time.time() - pub_time) / 3600
         recency_score = max(0, (72-hours_ago)/72 * 20)
-    except: recency_score = 10
+    except:
+        recency_score = 10
     return round(match_score + domain_score + recency_score, 1)
 
 def build_rss_urls(query):
     q = urllib.parse.quote_plus(query)
-    return [f"https://news.google.com/rss/search?q={q}",
-            "http://export.arxiv.org/rss/cs.AI"]
+    return [
+        f"https://news.google.com/rss/search?q={q}",
+        "http://export.arxiv.org/rss/cs.AI"
+    ]
 
 def fetch_and_rank(query):
     seen, items = load_archive(), []
@@ -66,29 +71,35 @@ def fetch_and_rank(query):
         d = feedparser.parse(feed_url)
         for entry in d.entries[:FETCH_LIMIT]:
             link, domain = entry.link, domain_of(entry.link)
-            if domain in BLOCKED_DOMAINS: continue
+            if domain in BLOCKED_DOMAINS:
+                continue
             uid, title = entry.get("id", link), entry.title.strip()
             pub_rss = entry.get("published", time.strftime("%Y-%m-%dT%H:%M:%SZ"))
             summary = extract_summary(getattr(entry, "summary", "") or title)
             pub_page = fetch_page_pubtime_head(link) if domain in TRUSTED_DOMAINS else None
             score = score_item(title, summary, query, domain, pub_rss, pub_page)
             items.append({
-                "title": title, "link": link, "source": domain,
-                "published_rss": pub_rss, "published_page": pub_page or "unknown",
-                "summary": summary, "score": score
+                "title": title,
+                "link": link,
+                "source": domain,
+                "published_rss": pub_rss,
+                "published_page": pub_page or "unknown",
+                "summary": summary,
+                "score": score
             })
             if uid not in seen:
                 seen[uid] = {"title": title, "link": link, "published": pub_rss}
     save_archive(seen)
     return sorted(items, key=lambda x: (x["score"], x["published_rss"]), reverse=True)[:20]
 
-@app.route("/search")
-def search():
-    query = request.args.get("q", "").strip()
+@app.route('/api/search', methods=['GET'])
+def search_news():
+    query = request.args.get('q')
     if not query:
-        return jsonify({"error": "No query provided."}), 400
+        return jsonify({"error": "Missing query parameter `q`"}), 400
     results = fetch_and_rank(query)
     return jsonify(results)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
